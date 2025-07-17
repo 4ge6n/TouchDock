@@ -1,0 +1,31 @@
+
+
+{
+  "name": "サンプルプリセット",
+  "dockItems": [
+    {
+      "name": "Safari",
+      "iconName": "safari",
+      "bundleID": "com.apple.Safari",
+      "actionType": "launchApp"
+    },
+    {
+      "name": "Terminalでecho",
+      "iconName": "terminal",
+      "actionType": "shell",
+      "actionValue": "echo 'Hello from TouchDock!'"
+    },
+    {
+      "name": "リターン",
+      "iconName": "returnkey",
+      "actionType": "keystroke",
+      "actionValue": "return"
+    },
+    {
+      "name": "日付表示AppleScript",
+      "iconName": "script",
+      "actionType": "applescript",
+      "actionValue": "display dialog (do shell script \"date\")"
+    }
+  ]
+}

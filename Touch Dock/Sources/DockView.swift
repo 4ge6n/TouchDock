@@ -130,11 +130,22 @@ class DockView: NSView {
         ctrlStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8).isActive = true
     }
 
-    /// ボタンクリックで該当アプリを前面に
+    /// ボタンクリックで該当アプリを前面に or 起動 or プリセットアクション
     @objc private func appButtonClicked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue,
               let app = apps.first(where: { $0.bundleID == id }) else { return }
-        app.app.activate(options: [.activateIgnoringOtherApps])
+        if let runningApp = app.app {
+            runningApp.activate(options: [.activateIgnoringOtherApps])
+        } else {
+            // プリセットDockボタンの場合はBarPreset.DockItemを参照してActionDispatcherへ
+            if let enginePreset = engine.preset,
+               let item = enginePreset.dockItems.first(where: { $0.bundleID == id }) {
+                ActionDispatcher.performAction(for: item)
+            } else {
+                // 旧互換: bundleIDでアプリ起動
+                NSWorkspace.shared.launchApplication(withBundleIdentifier: id, options: [], additionalEventParamDescriptor: nil, launchIdentifier: nil)
+            }
+        }
     }
 
     // システム音量・輝度制御

@@ -6,12 +6,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var prefsPanel: NSPanel?
     var screenshotShortcutView: MASShortcutView?
+    var engine = LayoutEngine()
+    var dockView: DockView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
         registerDefaultShortcuts()
         createMainWindow()
         bindShortcuts()
+
+        // プリセットをロードし、engineにセット
+        if let preset = PresetLoader.loadPreset(named: "default") {
+            engine.preset = preset
+        }
+
+        // DockView生成しウィンドウにセット
+        dockView = DockView(frame: window.contentView!.bounds, engine: engine)
+        window.contentView = dockView
+        dockView.refresh()
     }
 
     private func setupMenu() {
