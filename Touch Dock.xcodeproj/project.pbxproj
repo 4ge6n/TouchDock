@@ -29,9 +29,39 @@
 		91C3056B2E29566000E4DA0A /* Touch DockUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Touch DockUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		91C305CC2E2AB53D00E4DA0A /* Exceptions for "Touch Dock" folder in "Touch Dock" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Sources/TouchBarWindow.swift,
+				Sources/WindowManager.swift,
+				Tests/LoggerTests.swift,
+				Tests/WindowManagerTests.swift,
+			);
+			target = 91C305522E29565F00E4DA0A /* Touch Dock */;
+		};
+		91C305CD2E2AB53D00E4DA0A /* Exceptions for "Touch Dock" folder in "Touch DockTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Sources/LayoutEngine.swift,
+				Sources/Prefs.swift,
+				Sources/Theme.swift,
+				Sources/TouchBarWindow.swift,
+				Sources/WindowManager.swift,
+				Tests/LoggerTests.swift,
+				Tests/WindowManagerTests.swift,
+			);
+			target = 91C305602E29566000E4DA0A /* Touch DockTests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		91C305552E29565F00E4DA0A /* Touch Dock */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				91C305CC2E2AB53D00E4DA0A /* Exceptions for "Touch Dock" folder in "Touch Dock" target */,
+				91C305CD2E2AB53D00E4DA0A /* Exceptions for "Touch Dock" folder in "Touch DockTests" target */,
+			);
 			path = "Touch Dock";
 			sourceTree = "<group>";
 		};

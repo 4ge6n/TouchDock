@@ -1,131 +1,97 @@
-import Cocoa
+//
+//  WindowManager.swift
+//  TouchDock
+//
+//  Updated on 2025‑07‑19
+//
 
-class WindowManager: NSObject, NSWindowDelegate {
-    private(set) var window: NSWindow
-    private let defaultSize = NSSize(width: 800, height: 100)
-    
-    // ドック配置 0=下 1=上 2=左 3=右
-    var dockPosition: Int {
-        get { UserDefaults.standard.integer(forKey: "DockPosition") }
-        set { UserDefaults.standard.set(newValue, forKey: "DockPosition") }
+import Cocoa
+import OSLog
+
+/// Manages which screen the TouchDock panel lives on,
+/// watches for display re‑configuration events,
+/// and re‑locates the panel accordingly.
+final class WindowManager {
+
+    // MARK: Singleton
+    static let shared = WindowManager()
+    private init() {
+        startObservingDisplayChanges()
     }
-    
-    // スライドアニメON/OFF
-    var slideAnimation: Bool {
-        get { UserDefaults.standard.bool(forKey: "SlideAnimation") }
-        set { UserDefaults.standard.set(newValue, forKey: "SlideAnimation") }
+
+    // MARK: Public API
+    private(set) var currentScreen: NSScreen?
+    private var dockWindow: TouchBarWindow?
+
+    /// Call from AppDelegate once at launch.
+    func setupDockWindow() {
+        currentScreen = preferredScreen()
+        guard let screen = currentScreen else { return }
+
+        dockWindow = TouchBarWindow(screen: screen, edge: .bottom)
+        dockWindow?.makeKeyAndOrderFront(nil)
     }
-    
-    // MARK: - 初期化
-    override init() {
-        window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: defaultSize),
-            styleMask: [.titled, .fullSizeContentView, .resizable],
-            backing: .buffered,
-            defer: false)
-        window.title = "TouchDock"
-        window.level = .floating
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        super.init()
-        window.delegate = self
-        setupHoverAutoHide()
-        observeScreenChanges()
-        positionWindow()
+
+    /// Toggle visibility (for global hot‑key).
+    func toggleVisibility() {
+        guard let window = dockWindow else { return }
+        window.isVisible ? window.orderOut(nil) : window.orderFront(nil)
     }
-    
-    // MARK: - スクリーン端への吸着（マルチディスプレイ/現在のマウス位置優先）
-    func positionWindow() {
-        let screen = currentScreen()
-        let frame = calculateFrame(for: dockPosition, in: screen.visibleFrame)
-        window.setFrame(frame, display: true, animate: false)
-    }
-    
-    private func currentScreen() -> NSScreen {
-        // マウス位置の画面を優先、なければ main
-        let mouse = NSEvent.mouseLocation
-        for s in NSScreen.screens {
-            if s.frame.contains(mouse) { return s }
+
+    // MARK: Internals
+    /// Pick a screen to host the dock ― iPad/Sidecar first, else main display.
+    private func preferredScreen() -> NSScreen? {
+        let screens = NSScreen.screens
+
+        // iPad (Sidecar / Luna) detection – fall back to main
+        if let ipad = screens.first(where: { $0.localizedName.contains("iPad") }) {
+            return ipad
         }
-        return NSScreen.main ?? NSScreen.screens.first!
+        return NSScreen.main ?? screens.first
     }
-    
-    private func calculateFrame(for position: Int, in visible: NSRect) -> NSRect {
-        let w = window.frame.width, h = window.frame.height
-        let centerX = visible.minX + (visible.width - w)/2
-        let centerY = visible.minY + (visible.height - h)/2
-        switch position {
-        case 0: // 下
-            return NSRect(x: round(centerX), y: visible.minY, width: w, height: h)
-        case 1: // 上
-            return NSRect(x: round(centerX), y: visible.maxY - h, width: w, height: h)
-        case 2: // 左
-            return NSRect(x: visible.minX, y: round(centerY), width: w, height: h)
-        case 3: // 右
-            return NSRect(x: visible.maxX - w, y: round(centerY), width: w, height: h)
-        default:
-            return NSRect(x: round(centerX), y: visible.minY, width: w, height: h)
+
+    /// Re-evaluate screens and move the dock when a configuration change occurs.
+    private func refreshScreens() {
+        let next = preferredScreen()
+        guard next != currentScreen else { return }
+
+        currentScreen = next
+        relocateDock()
+        log.debug("Display change detected – dock moved to \(next?.localizedName ?? "nil").")
+    }
+
+    /// Physically move the NSPanel to `currentScreen`.
+    private func relocateDock() {
+        guard let screen = currentScreen, let win = dockWindow else { return }
+        win.move(to: screen, edge: .bottom)          // `.bottom` is the default edge for now
+    }
+}
+
+// MARK: – Display change observers
+private extension WindowManager {
+
+    func startObservingDisplayChanges() {
+
+        // High‑level notification (most cases).
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                self?.refreshScreens()
         }
+
+        // Low‑level callback catches GPU / AirPlay / Sidecar events.
+        CGDisplayRegisterReconfigurationCallback({ _, _, _ in
+            DispatchQueue.main.async {
+                WindowManager.shared.refreshScreens()
+            }
+        }, nil)
     }
-    
-    // MARK: - 画面構成/Spaces変更時も自動再配置
-    private func observeScreenChanges() {
-        let nc = NSWorkspace.shared.notificationCenter
-        nc.addObserver(self, selector: #selector(screenDidChange), name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(screenDidChange), name: NSWindow.didChangeScreenNotification, object: nil)
-    }
-    @objc private func screenDidChange(_ note: Notification) {
-        positionWindow()
-    }
-    
-    // MARK: - ウィンドウリサイズ時にも吸着維持
-    func windowDidResize(_ notification: Notification) {
-        positionWindow()
-    }
-    
-    // MARK: - ホバーでスライドイン/アウト
-    private func setupHoverAutoHide() {
-        guard let contentView = window.contentView else { return }
-        window.acceptsMouseMovedEvents = true
-        let area = NSTrackingArea(rect: contentView.bounds,
-                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                  owner: self,
-                                  userInfo: nil)
-        contentView.addTrackingArea(area)
-    }
-    
-    override func mouseEntered(with event: NSEvent) {
-        slideIn()
-    }
-    
-    override func mouseExited(with event: NSEvent) {
-        slideOut()
-    }
-    
-    func slideIn() {
-        guard slideAnimation else { return }
-        let screen = currentScreen()
-        let frame = calculateFrame(for: dockPosition, in: screen.visibleFrame)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.28
-            window.animator().setFrame(frame, display: true)
-        }
-    }
-    
-    func slideOut() {
-        guard slideAnimation else { return }
-        let screen = currentScreen()
-        var frame = calculateFrame(for: dockPosition, in: screen.visibleFrame)
-        switch dockPosition {
-        case 0: frame.origin.y -= frame.height      // 下
-        case 1: frame.origin.y += frame.height      // 上
-        case 2: frame.origin.x -= frame.width       // 左
-        case 3: frame.origin.x += frame.width       // 右
-        default: frame.origin.y -= frame.height
-        }
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.28
-            window.animator().setFrame(frame, display: true)
-        }
-    }
+}
+
+// MARK: – Logger
+private extension WindowManager {
+    /// Static logger for this subsystem.
+    static let log = Logger(subsystem: "com.example.TouchDock",
+                            category: "window-manager")
+    var log: Logger { Self.log }
 }

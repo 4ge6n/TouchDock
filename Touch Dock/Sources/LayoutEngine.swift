@@ -66,3 +66,69 @@ class LayoutEngine {
         nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { _ in callback() }
     }
 }
+// MARK: - Edge & Snap Helpers
+/// Screen edge positions the dock can attach to.
+enum Edge: String, CaseIterable {
+    case top, bottom, left, right
+}
+
+extension LayoutEngine {
+
+    /// Calculate the frame for a dock of given thickness on a specific screen edge.
+    /// - Parameters:
+    ///   - screen: Target `NSScreen`.
+    ///   - edge:   Attachment edge.
+    ///   - thickness: Height (top/bottom) or width (left/right) of the dock.
+    static func frame(for screen: NSScreen,
+                      edge: Edge,
+                      thickness: CGFloat = 48) -> NSRect {
+
+        let f = screen.frame
+        switch edge {
+        case .bottom:
+            return NSRect(x: f.minX, y: f.minY,
+                          width: f.width, height: thickness)
+        case .top:
+            return NSRect(x: f.minX, y: f.maxY - thickness,
+                          width: f.width, height: thickness)
+        case .left:
+            return NSRect(x: f.minX, y: f.minY,
+                          width: thickness, height: f.height)
+        case .right:
+            return NSRect(x: f.maxX - thickness, y: f.minY,
+                          width: thickness, height: f.height)
+        }
+    }
+
+    /// Return the closest screen edge to the given window if it is within `threshold` points.
+    private static func closestEdge(for window: NSWindow,
+                                    threshold: CGFloat = 32) -> Edge? {
+
+        guard let screen = window.screen else { return nil }
+        let frame = window.frame
+        let s = screen.frame
+
+        let distances: [(Edge, CGFloat)] = [
+            (.bottom, abs(frame.minY - s.minY)),
+            (.top,    abs(frame.maxY - s.maxY)),
+            (.left,   abs(frame.minX - s.minX)),
+            (.right,  abs(frame.maxX - s.maxX))
+        ]
+        if let (edge, dist) = distances.min(by: { $0.1 < $1.1 }), dist <= threshold {
+            return edge
+        }
+        return nil
+    }
+
+    /// Snap the window to the nearest edge if within threshold distance.
+    static func snap(window: NSWindow,
+                     threshold: CGFloat = 32,
+                     thickness: CGFloat = 48) {
+
+        guard let screen = window.screen,
+              let edge = closestEdge(for: window, threshold: threshold) else { return }
+
+        let newFrame = frame(for: screen, edge: edge, thickness: thickness)
+        window.setFrame(newFrame, display: true, animate: true)
+    }
+}

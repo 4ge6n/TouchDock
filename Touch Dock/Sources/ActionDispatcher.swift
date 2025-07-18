@@ -9,8 +9,20 @@
 
 import Foundation
 import AppKit
+import SwiftUI     // for NSAlert helper
 
 class ActionDispatcher {
+    /// Show an error alert on the main thread.
+    private static func showAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = title
+            alert.informativeText = message
+            alert.runModal()
+        }
+    }
+
     static func performAction(for item: BarPreset.DockItem) {
         let actionType = item.actionType ?? "launchApp"
         Logger.shared.log("ActionDispatcher: 実行開始: \(actionType) \(item.name)")
@@ -52,29 +64,55 @@ class ActionDispatcher {
         }
     }
 
-    private static func sendKeystroke(_ key: String) {
-        // 例: "a"→aキー, "return"→リターン等（本格運用時はキー定義表・モディファイア対応必須）
-        // ここではシンプルな例のみ
-        let source = CGEventSource(stateID: .hidSystemState)
-        if let k = keyToKeyCode(key) {
-            let down = CGEvent(keyboardEventSource: source, virtualKey: k, keyDown: true)
-            let up = CGEvent(keyboardEventSource: source, virtualKey: k, keyDown: false)
-            down?.post(tap: .cghidEventTap)
-            up?.post(tap: .cghidEventTap)
-        } else {
-            Logger.shared.error("ActionDispatcher: 未知のキー: \(key)")
+    /// Send a key (with optional modifiers) such as "cmd+shift+4" or "ctrl+alt+return".
+    private static func sendKeystroke(_ combo: String) {
+        let parts = combo.split(separator: "+").map { $0.lowercased() }
+
+        guard let keyPart = parts.last,
+              let keycode = keyToKeyCode(String(keyPart)) else {
+            Logger.shared.error("ActionDispatcher: 未知のキー: \(combo)")
+            showAlert(title: "Invalid Keystroke", message: "Unknown key in '\(combo)'.")
+            return
         }
+
+        // Modifier flags
+        var flags: CGEventFlags = []
+        for tok in parts.dropLast() {
+            switch tok {
+            case "cmd", "command":   flags.insert(.maskCommand)
+            case "alt", "option":    flags.insert(.maskAlternate)
+            case "ctrl", "control":  flags.insert(.maskControl)
+            case "shift":            flags.insert(.maskShift)
+            default:
+                Logger.shared.error("ActionDispatcher: 未知のモディファイア: \(tok)")
+            }
+        }
+
+        let src = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: true)
+        let up   = CGEvent(keyboardEventSource: src, virtualKey: keycode, keyDown: false)
+        down?.flags = flags
+        up?.flags   = flags
+        down?.post(tap: .cghidEventTap)
+        up?.post(tap: .cghidEventTap)
     }
 
+    /// Map common keys / digits to CGKeyCode
     private static func keyToKeyCode(_ key: String) -> CGKeyCode? {
-        // 超簡易: 一部のみ対応
-        switch key.lowercased() {
-        case "a": return 0
-        case "s": return 1
-        case "d": return 2
-        case "f": return 3
-        case "return": return 36
-        case "space": return 49
+        // alphabets
+        if let ascii = key.unicodeScalars.first?.value,
+           ascii >= 97 && ascii <= 122 {           // a–z
+            return CGKeyCode(ascii - 97)
+        }
+        // digits 0–9
+        if let d = Int(key), (0...9).contains(d) {
+            return CGKeyCode(29 + d)               // kVK_ANSI_0 is 29
+        }
+        switch key {
+        case "return", "enter": return 36          // kVK_Return
+        case "space":           return 49          // kVK_Space
+        case "escape", "esc":   return 53          // kVK_Escape
+        case "tab":             return 48          // kVK_Tab
         default: return nil
         }
     }
@@ -85,6 +123,7 @@ class ActionDispatcher {
         appleScript?.executeAndReturnError(&error)
         if let error = error {
             Logger.shared.error("ActionDispatcher: AppleScriptエラー: \(error)")
+            showAlert(title: "AppleScript Error", message: error.description)
         }
     }
 
@@ -93,10 +132,14 @@ class ActionDispatcher {
         task.launchPath = "/bin/zsh"
         task.arguments = ["-c", cmd]
         do {
+            let pipe = Pipe()
+            task.standardError = pipe
+            task.standardOutput = pipe
             try task.run()
             Logger.shared.log("ActionDispatcher: シェルコマンド起動: \(cmd)")
         } catch {
             Logger.shared.error("ActionDispatcher: シェルコマンド起動失敗: \(error)")
+            showAlert(title: "Shell Command Error", message: error.localizedDescription)
         }
     }
 }

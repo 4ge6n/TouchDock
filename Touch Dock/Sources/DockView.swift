@@ -1,47 +1,85 @@
 import Cocoa
+import Combine
+import SwiftUI   // PrefsModel
+import CoreGraphics      // for hitScale
+// Theme
 
 /// Dockのアイコン多段表示ビュー
 class DockView: NSView {
     private var stackRows: [NSStackView] = []
     private var engine = LayoutEngine()
     private var apps: [LayoutEngine.DockApp] = []
+    private var cancellables = Set<AnyCancellable>()
+    private let prefs = PrefsModel()
+    private var themeCancellable: AnyCancellable?
+
+    /// 1.5× larger buttons when the dock is on an iPad Sidecar/Luna display.
+    private var hitScale: CGFloat {
+        if let scr = window?.screen,
+           scr.localizedName.contains("iPad") {
+            return 1.5
+        }
+        return 1.0
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        observePrefs() // 追加: UserDefaults監視開始
+        bindPresetLoader()
+        setupBindings()
         refresh()
     }
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        observePrefs() // 追加: UserDefaults監視開始
+        bindPresetLoader()
+        setupBindings()
         refresh()
     }
     override func awakeFromNib() {
         super.awakeFromNib()
-        observePrefs() // 追加: awakeFromNibでもUserDefaults監視開始
+        bindPresetLoader()
+        setupBindings()
         refresh()
     }
     deinit {
-        NotificationCenter.default.removeObserver(self) // 追加: UserDefaults監視解除
     }
 
-    /// UserDefaults監視
-    private func observePrefs() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(onPrefsChanged),
-            name: UserDefaults.didChangeNotification,
-            object: nil
-        )
+    /// Subscribe to PresetLoader changes and refresh the UI when a new preset is loaded.
+    private func bindPresetLoader() {
+        PresetLoader.shared.$currentPreset
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &cancellables)
     }
-    @objc private func onPrefsChanged(_ note: Notification) {
-        refresh()
+
+    private func setupBindings() {
+        // Opacity
+        prefs.$dockOpacity
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
+            .store(in: &cancellables)
+
+        // Multi-row
+        prefs.$multiRow
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh() }
+            .store(in: &cancellables)
+
+        // Theme changes
+        themeCancellable = ThemeManager.shared.$current
+            .receive(on: RunLoop.main)
+            .sink { [weak self] t in
+                self?.applyTheme(t)
+            }
+        // Apply initial theme
+        applyTheme(ThemeManager.shared.current)
     }
 
     /// アプリアイコン一覧をリフレッシュ
     func refresh() {
         // Prefsの透過度反映 追加
-        self.alphaValue = Prefs.dockOpacity
+        self.alphaValue = CGFloat(prefs.dockOpacity)
 
         // 一度全削除
         stackRows.forEach { $0.removeFromSuperview() }
@@ -50,7 +88,7 @@ class DockView: NSView {
         // 最新アプリ取得
         apps = engine.fetchDockApps()
         // 多段/1段切り替え 追加
-        let multi = Prefs.multiRowEnabled
+        let multi = prefs.multiRow
         let perRow = engine.maxIconsPerRow(windowWidth: bounds.width)
         var rows: [[LayoutEngine.DockApp]]
         if multi {
@@ -74,7 +112,13 @@ class DockView: NSView {
                 btn.identifier = NSUserInterfaceItemIdentifier(app.bundleID)
                 btn.setButtonType(.momentaryChange)
                 btn.toolTip = app.name // アプリ名をツールチップ
+                btn.contentTintColor = ThemeManager.shared.current.buttonTint
                 stack.addArrangedSubview(btn)
+                // Increase hit target for touch displays
+                let base: CGFloat = 44
+                let size = base * hitScale
+                btn.widthAnchor.constraint(equalToConstant: size).isActive = true
+                btn.heightAnchor.constraint(equalToConstant: size).isActive = true
             }
             stack.translatesAutoresizingMaskIntoConstraints = false
             addSubview(stack)
@@ -138,8 +182,8 @@ class DockView: NSView {
             runningApp.activate(options: [.activateIgnoringOtherApps])
         } else {
             // プリセットDockボタンの場合はBarPreset.DockItemを参照してActionDispatcherへ
-            if let enginePreset = engine.preset,
-               let item = enginePreset.dockItems.first(where: { $0.bundleID == id }) {
+            if let preset = PresetLoader.shared.currentPreset,
+               let item = preset.dockItems.first(where: { $0.bundleID == id }) {
                 ActionDispatcher.performAction(for: item)
             } else {
                 // 旧互換: bundleIDでアプリ起動
@@ -159,5 +203,14 @@ class DockView: NSView {
         var error: NSDictionary?
         let appleScript = NSAppleScript(source: script)
         appleScript?.executeAndReturnError(&error)
+    }
+
+    /// Update background and tint according to current theme.
+    private func applyTheme(_ theme: Theme) {
+        wantsLayer = true
+        layer?.backgroundColor = theme.background.cgColor
+        for btn in stackRows.flatMap({ $0.arrangedSubviews }).compactMap({ $0 as? NSButton }) {
+            btn.contentTintColor = theme.buttonTint
+        }
     }
 }
